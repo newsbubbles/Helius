@@ -1,0 +1,14 @@
+data:
+  train_index: "data/train_index.txt"  # Update after data prep
+model:
+  latent_dim: 64
+training:
+  batch_size: 8
+  lr: 1e-4
+  kl_weight: 0.001
+  epochs: 10
+  ckpt_dir: "checkpoints/"
+  prior_lr: 1e-4
+  prior_epochs: 5
+inference:
+  sample_rate: 48000

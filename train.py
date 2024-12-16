@@ -74,6 +74,7 @@ def train_vae(config):
             'decoder': decoder.state_dict()
         }, os.path.join(config['training']['ckpt_dir'], f"vae_epoch{epoch+1}.pt"))
 
+# train.py (relevant section)
 def train_prior(config, vae_ckpt, train_index):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder = Encoder(latent_dim=int(config['model']['latent_dim'])).to(device)
@@ -97,20 +98,23 @@ def train_prior(config, vae_ckpt, train_index):
 
             mu, logvar = encoder(audio)
             z = mu  # deterministic latent
-            z_seq = z.transpose(1, 2).contiguous()  # Make sure it's contiguous
+            z_seq = z.transpose(1, 2).contiguous()  # [1, T, latent_dim]
             latents_list.append(z_seq)
     
-    latents = torch.cat(latents_list, dim=1).contiguous() # [1, Total_T, latent_dim]
-    input_seq = latents[:, :-1, :].contiguous()
-    target_seq = latents[:, 1:, :].contiguous()
+    latents = torch.cat(latents_list, dim=1).contiguous()  # [1, Total_T, latent_dim]
+    input_seq = latents[:, :-1, :].contiguous()  # [1, Total_T-1, latent_dim]
+    target_seq = latents[:, 1:, :].contiguous()  # [1, Total_T-1, latent_dim]
 
     prior = LatentPrior(latent_dim=int(config['model']['latent_dim']), hidden_size=128).to(device)
+    # Ensure GRU parameters are flattened
+    prior.rnn.flatten_parameters()
+    
     optimizer = optim.Adam(prior.parameters(), lr=float(config['training']['prior_lr']))
     criterion = nn.MSELoss()
 
     for epoch in range(int(config['training']['prior_epochs'])):
         prior.train()
-        pred = prior(input_seq) # [1, T-1, latent_dim]
+        pred = prior(input_seq)  # [1, T-1, latent_dim]
         loss = criterion(pred, target_seq)
         optimizer.zero_grad()
         loss.backward()

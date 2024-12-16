@@ -10,7 +10,7 @@ class LatentPrior(nn.Module):
 
     def forward(self, z_seq):
         # z_seq: [B, T, latent_dim]
-        out, _ = self.rnn(z_seq)
+        out, _ = self.rnn(z_seq.contiguous())
         # Typically we want to predict the next frame given the current frame
         # This returns predictions at each step. For next-step prediction:
         return self.fc(out)

@@ -97,12 +97,12 @@ def train_prior(config, vae_ckpt, train_index):
 
             mu, logvar = encoder(audio)
             z = mu  # deterministic latent
-            z_seq = z.transpose(1,2) # [B, T, latent_dim]
+            z_seq = z.transpose(1, 2).contiguous()  # Make sure it's contiguous
             latents_list.append(z_seq)
     
-    latents = torch.cat(latents_list, dim=1) # [1, Total_T, latent_dim]
-    input_seq = latents[:, :-1, :]
-    target_seq = latents[:, 1:, :]
+    latents = torch.cat(latents_list, dim=1).contiguous() # [1, Total_T, latent_dim]
+    input_seq = latents[:, :-1, :].contiguous()
+    target_seq = latents[:, 1:, :].contiguous()
 
     prior = LatentPrior(latent_dim=int(config['model']['latent_dim']), hidden_size=128).to(device)
     optimizer = optim.Adam(prior.parameters(), lr=float(config['training']['prior_lr']))

@@ -21,11 +21,20 @@ class AudioDataset(Dataset):
     def __getitem__(self, idx):
         path = self.files[idx]
         audio, sr = torchaudio.load(path)
-        return audio # [1, T]
+        audio = audio.float()
+        if audio.shape[0] > 1:
+            audio = torch.mean(audio, dim=0, keepdim=True)
+        return audio  # [1, T]
 
 def train_vae(config):
     dataset = AudioDataset(config['data']['train_index'])
-    loader = DataLoader(dataset, batch_size=int(config['training']['batch_size']), shuffle=True, num_workers=4, drop_last=True)
+    loader = DataLoader(
+        dataset,
+        batch_size=int(config['training']['batch_size']),
+        shuffle=True,
+        num_workers=4,
+        drop_last=True
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder = Encoder(latent_dim=int(config['model']['latent_dim'])).to(device)
@@ -66,7 +75,6 @@ def train_vae(config):
         }, os.path.join(config['training']['ckpt_dir'], f"vae_epoch{epoch+1}.pt"))
 
 def train_prior(config, vae_ckpt, train_index):
-    # Load encoder & decoder
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder = Encoder(latent_dim=int(config['model']['latent_dim'])).to(device)
     decoder = Decoder(latent_dim=int(config['model']['latent_dim'])).to(device)
@@ -76,22 +84,23 @@ def train_prior(config, vae_ckpt, train_index):
     encoder.eval()
     decoder.eval()
 
-    # Collect latent sequences from training data
     files = [l.strip() for l in open(train_index) if l.strip()]
     latents_list = []
     with torch.no_grad():
         for f in files:
             audio, sr = torchaudio.load(f)
-            audio = audio.to(device)
+            audio = audio.float()
+            if audio.shape[0] > 1:
+                audio = torch.mean(audio, dim=0, keepdim=True)
+            # Add batch dimension: now [1, 1, T]
+            audio = audio.unsqueeze(0).to(device)
+
             mu, logvar = encoder(audio)
-            z = mu # we just use mu as deterministic latent
-            # z: [B, latent_dim, T], typically B=1
+            z = mu  # deterministic latent
             z_seq = z.transpose(1,2) # [B, T, latent_dim]
             latents_list.append(z_seq)
     
-    # Concatenate all
     latents = torch.cat(latents_list, dim=1) # [1, Total_T, latent_dim]
-    # We want next-step prediction
     input_seq = latents[:, :-1, :]
     target_seq = latents[:, 1:, :]
 

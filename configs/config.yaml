@@ -1,9 +1,9 @@
 data:
   train_index: "data/train_index.txt"  # Update after data prep
 model:
-  latent_dim: 64
+  latent_dim: 32
 training:
-  batch_size: 8
+  batch_size: 1
   lr: 1e-4
   kl_weight: 0.001
   epochs: 10

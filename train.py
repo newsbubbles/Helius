@@ -74,7 +74,6 @@ def train_vae(config):
             'decoder': decoder.state_dict()
         }, os.path.join(config['training']['ckpt_dir'], f"vae_epoch{epoch+1}.pt"))
 
-# train.py (relevant section)
 def train_prior(config, vae_ckpt, train_index):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder = Encoder(latent_dim=int(config['model']['latent_dim'])).to(device)
@@ -98,23 +97,35 @@ def train_prior(config, vae_ckpt, train_index):
 
             mu, logvar = encoder(audio)
             z = mu  # deterministic latent
-            z_seq = z.transpose(1, 2).contiguous()  # [1, T, latent_dim]
+            # Transpose to [B, T, latent_dim] and make contiguous
+            z_seq = z.transpose(1, 2).contiguous()
             latents_list.append(z_seq)
     
-    latents = torch.cat(latents_list, dim=1).contiguous()  # [1, Total_T, latent_dim]
-    input_seq = latents[:, :-1, :].contiguous()  # [1, Total_T-1, latent_dim]
-    target_seq = latents[:, 1:, :].contiguous()  # [1, Total_T-1, latent_dim]
+    if len(latents_list) == 0:
+        raise ValueError("No latent sequences were generated. Check your dataset and model.")
+
+    latents = torch.cat(latents_list, dim=1).contiguous() # [1, Total_T, latent_dim]
+
+    # Ensure that we have at least two time steps
+    if latents.size(1) < 2:
+        raise ValueError(f"Not enough latent frames to train prior. Needed at least 2, got {latents.size(1)}. Consider longer segments or different model settings.")
+
+    input_seq = latents[:, :-1, :].contiguous()
+    target_seq = latents[:, 1:, :].contiguous()
+
+    # Debug: print shapes
+    print("input_seq shape:", input_seq.shape)
+    print("target_seq shape:", target_seq.shape)
+
+    assert input_seq.size(1) > 0, "input_seq has zero time steps. Increase segment length or adjust model."
 
     prior = LatentPrior(latent_dim=int(config['model']['latent_dim']), hidden_size=128).to(device)
-    # Ensure GRU parameters are flattened
-    prior.rnn.flatten_parameters()
-    
     optimizer = optim.Adam(prior.parameters(), lr=float(config['training']['prior_lr']))
     criterion = nn.MSELoss()
 
     for epoch in range(int(config['training']['prior_epochs'])):
         prior.train()
-        pred = prior(input_seq)  # [1, T-1, latent_dim]
+        pred = prior(input_seq) # [1, T-1, latent_dim]
         loss = criterion(pred, target_seq)
         optimizer.zero_grad()
         loss.backward()

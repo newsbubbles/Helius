@@ -2,6 +2,8 @@
 
 Helius is a project designed to train and run a state-of-the-art unsupervised real-time audio generation system. It leverages an encoder-decoder (VAE-like) architecture to learn a latent representation of audio and a latent prior model (e.g., an RNN) to generate or transform audio signals in real-time.
 
+[Google Colab Notebook](https://colab.research.google.com/drive/1D56P-ZEm13WA7-Us5CrCpKDakXLXIs4o)
+
 ## Project Overview
 
 The system is composed of three major parts:

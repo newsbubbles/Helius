@@ -12,6 +12,10 @@ from models.utils import sample_latent
 from models.latent_prior import LatentPrior
 
 class AudioDataset(Dataset):
+    """
+    Used for VAE training:
+    Each item is a single audio waveform [1, T] from data/train_index.txt
+    """
     def __init__(self, index_file):
         self.files = [l.strip() for l in open(index_file) if l.strip()]
     
@@ -22,9 +26,10 @@ class AudioDataset(Dataset):
         path = self.files[idx]
         audio, sr = torchaudio.load(path)
         audio = audio.float()
+        # Convert stereo to mono if needed
         if audio.shape[0] > 1:
             audio = torch.mean(audio, dim=0, keepdim=True)
-        return audio  # [1, T]
+        return audio  # shape: [1, T]
 
 def train_vae(config):
     dataset = AudioDataset(config['data']['train_index'])
@@ -74,68 +79,122 @@ def train_vae(config):
             'decoder': decoder.state_dict()
         }, os.path.join(config['training']['ckpt_dir'], f"vae_epoch{epoch+1}.pt"))
 
-def train_prior(config, vae_ckpt, train_index):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    encoder = Encoder(latent_dim=int(config['model']['latent_dim'])).to(device)
-    decoder = Decoder(latent_dim=int(config['model']['latent_dim'])).to(device)
-    state = torch.load(vae_ckpt, map_location=device)
-    encoder.load_state_dict(state['encoder'])
-    decoder.load_state_dict(state['decoder'])
-    encoder.eval()
-    decoder.eval()
+##############################
+# LatentDataset for Prior
+##############################
+class LatentDataset(Dataset):
+    """
+    For prior training:
+    Each item is a latent sequence [1, T, latent_dim] derived from a single file.
+    We run the file through the trained encoder on-the-fly.
+    """
+    def __init__(self, index_file, vae_ckpt, config):
+        self.files = [l.strip() for l in open(index_file) if l.strip()]
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    files = [l.strip() for l in open(train_index) if l.strip()]
-    latents_list = []
-    with torch.no_grad():
-        for f in files:
-            audio, sr = torchaudio.load(f)
-            audio = audio.float()
-            if audio.shape[0] > 1:
-                audio = torch.mean(audio, dim=0, keepdim=True)
-            # Add batch dimension: now [1, 1, T]
-            audio = audio.unsqueeze(0).to(device)
+        # Load trained VAE
+        self.encoder = Encoder(latent_dim=int(config['model']['latent_dim'])).to(device)
+        self.decoder = Decoder(latent_dim=int(config['model']['latent_dim'])).to(device)
 
-            mu, logvar = encoder(audio)
-            z = mu  # deterministic latent
-            # Transpose to [B, T, latent_dim] and make contiguous
-            z_seq = z.transpose(1, 2)
-            latents_list.append(z_seq)
+        state = torch.load(vae_ckpt, map_location=device)
+        self.encoder.load_state_dict(state['encoder'])
+        self.decoder.load_state_dict(state['decoder'])
+        self.encoder.eval()
+        self.decoder.eval()
+
+        self.device = device
+        self.latent_dim = int(config['model']['latent_dim'])
+
+    def __len__(self):
+        return len(self.files)
     
-    if len(latents_list) == 0:
-        raise ValueError("No latent sequences were generated. Check your dataset and model.")
+    def __getitem__(self, idx):
+        path = self.files[idx]
+        audio, sr = torchaudio.load(path)
+        audio = audio.float()
+        if audio.shape[0] > 1:
+            audio = torch.mean(audio, dim=0, keepdim=True)
+        # shape: [1, T]
+        audio = audio.unsqueeze(0).to(self.device)  # now [1, 1, T]
+        
+        with torch.no_grad():
+            mu, logvar = self.encoder(audio)
+            z_seq = mu.transpose(1, 2)  # [B=1, T, latent_dim]
+        
+        return z_seq.squeeze(0)  # return shape: [T, latent_dim]
 
-    latents = torch.cat(latents_list, dim=1) # [1, Total_T, latent_dim]
+def collate_latents(batch):
+    """
+    We receive a list of latent sequences, each shape [T, latent_dim].
+    For simpler prior training, let's process them one at a time (batch_size=1).
+    But if you want to handle multiple at once, you'll need to handle variable sequence lengths.
+    """
+    # We'll just return them as-is: a list of [T, latent_dim].
+    # The DataLoader will pass them individually if batch_size=1.
+    return batch
 
-    # Ensure that we have at least two time steps
-    if latents.size(1) < 2:
-        raise ValueError(f"Not enough latent frames to train prior. Needed at least 2, got {latents.size(1)}. Consider longer segments or different model settings.")
+def train_prior(config, vae_ckpt, train_index):
+    """
+    Instead of merging everything into one giant tensor,
+    we treat each file's latent sequence as a separate training example.
+    We'll iterate over them using a DataLoader with batch_size=1.
+    """
+    # Create a dataset of latent sequences
+    latent_dataset = LatentDataset(train_index, vae_ckpt, config)
 
-    input_seq = latents[:, :-1, :]
-    target_seq = latents[:, 1:, :]
+    loader = DataLoader(
+        latent_dataset,
+        batch_size=1,            # one latent sequence at a time
+        shuffle=True,            # shuffle file order
+        num_workers=0,           # or more if you like
+        collate_fn=collate_latents
+    )
 
-    # Debug: print shapes
-    print("input_seq shape:", input_seq.shape)
-    print("target_seq shape:", target_seq.shape)
-
-    assert input_seq.size(1) > 0, "input_seq has zero time steps. Increase segment length or adjust model."
-
+    device = latent_dataset.device
     prior = LatentPrior(latent_dim=int(config['model']['latent_dim']), hidden_size=128).to(device)
     optimizer = optim.Adam(prior.parameters(), lr=float(config['training']['prior_lr']))
     criterion = nn.MSELoss()
 
     for epoch in range(int(config['training']['prior_epochs'])):
         prior.train()
-        print(input_seq.stride())
-        print(target_seq.stride())
-        pred = prior(input_seq) # [1, T-1, latent_dim]
-        loss = criterion(pred, target_seq)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        print(f"Prior Epoch {epoch+1}/{int(config['training']['prior_epochs'])}, Loss: {loss.item():.4f}")
+        total_loss = 0
+        count = 0
 
+        for batch_seqs in loader:
+            # batch_seqs is a list of single sequences (since batch_size=1, we have just 1 item in the list)
+            # each item is shape: [T, latent_dim]
+            z_seq = batch_seqs[0].to(device)  # shape [T, latent_dim]
+            
+            if z_seq.size(0) < 2:
+                # Not enough frames for next-step prediction
+                continue
+
+            # Make a sequence [1, T, latent_dim] so RNN sees (batch, time, features)
+            z_seq = z_seq.unsqueeze(0)  # [1, T, latent_dim]
+
+            input_seq = z_seq[:, :-1, :]  # [1, T-1, latent_dim]
+            target_seq = z_seq[:, 1:, :]  # [1, T-1, latent_dim]
+
+            pred = prior(input_seq)  # [1, T-1, latent_dim]
+            loss = criterion(pred, target_seq)
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            count += 1
+
+        avg_loss = total_loss / (count if count > 0 else 1)
+        print(f"Prior Epoch {epoch+1}/{int(config['training']['prior_epochs'])}, Avg Loss: {avg_loss:.4f}")
+
+    # Finally, save the prior
+    os.makedirs(config['training']['ckpt_dir'], exist_ok=True)
     torch.save(prior.state_dict(), os.path.join(config['training']['ckpt_dir'], "prior_final.pt"))
 
+######################################
+# main
+######################################
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)

@@ -125,6 +125,8 @@ def train_prior(config, vae_ckpt, train_index):
 
     for epoch in range(int(config['training']['prior_epochs'])):
         prior.train()
+        print(input_seq.stride())
+        print(target_seq.stride())
         pred = prior(input_seq) # [1, T-1, latent_dim]
         loss = criterion(pred, target_seq)
         optimizer.zero_grad()

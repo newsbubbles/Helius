@@ -98,20 +98,20 @@ def train_prior(config, vae_ckpt, train_index):
             mu, logvar = encoder(audio)
             z = mu  # deterministic latent
             # Transpose to [B, T, latent_dim] and make contiguous
-            z_seq = z.transpose(1, 2).contiguous()
+            z_seq = z.transpose(1, 2)
             latents_list.append(z_seq)
     
     if len(latents_list) == 0:
         raise ValueError("No latent sequences were generated. Check your dataset and model.")
 
-    latents = torch.cat(latents_list, dim=1).contiguous() # [1, Total_T, latent_dim]
+    latents = torch.cat(latents_list, dim=1) # [1, Total_T, latent_dim]
 
     # Ensure that we have at least two time steps
     if latents.size(1) < 2:
         raise ValueError(f"Not enough latent frames to train prior. Needed at least 2, got {latents.size(1)}. Consider longer segments or different model settings.")
 
-    input_seq = latents[:, :-1, :].contiguous()
-    target_seq = latents[:, 1:, :].contiguous()
+    input_seq = latents[:, :-1, :]
+    target_seq = latents[:, 1:, :]
 
     # Debug: print shapes
     print("input_seq shape:", input_seq.shape)

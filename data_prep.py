@@ -49,7 +49,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_dir", required=True)
     parser.add_argument("--output_dir", required=True)
-    parser.add_argument("--segment_length", type=float, default=0.5)
+    parser.add_argument("--segment_length", type=float, default=2)
     parser.add_argument("--sample_rate", type=int, default=48000)
     args = parser.parse_args()
     prepare_data(args.input_dir, args.output_dir, args.segment_length, args.sample_rate)

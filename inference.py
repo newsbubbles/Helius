@@ -35,6 +35,9 @@ def generate_audio(config, vae_ckpt, prior_ckpt, length_seconds=10, sample_rate=
     audio = decoder(z_seq) # [1, 1, T_samples]
     audio = audio.cpu()
     
+    # Give it a lil' squeeze to get that batch dim out! yeet!
+    audio = audio.squeeze(0)
+    
     os.makedirs("generated", exist_ok=True)
     out_path = "generated/generated.wav"
     torchaudio.save(out_path, audio, sample_rate)

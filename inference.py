@@ -3,6 +3,7 @@ import torchaudio
 import argparse
 import yaml
 import os
+import time
 from models.encoder import Encoder
 from models.decoder import Decoder
 from models.latent_prior import LatentPrior
@@ -89,4 +90,7 @@ if __name__ == "__main__":
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
+    st = time.time()
     generate_audio(config, args.vae_ckpt, args.prior_ckpt, args.length_seconds, args.sample_rate)
+    fin = time.time() - st
+    print(fin)

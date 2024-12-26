@@ -5,6 +5,7 @@ class LatentPrior(nn.Module):
     def __init__(self, latent_dim=64, hidden_size=128):
         super().__init__()
         self.latent_dim = latent_dim
+        # self.rnn = nn.GRU(latent_dim, hidden_size, num_layers=2, batch_first=True)
         self.rnn = nn.GRU(latent_dim, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, latent_dim)
 

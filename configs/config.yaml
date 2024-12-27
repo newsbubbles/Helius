@@ -1,14 +1,21 @@
 data:
-  train_index: "data/train_index.txt"  # Update after data prep
+  train_index: "data/train_index.txt"
+
 model:
   latent_dim: 128
+
 training:
+  # chunk sizes in samples
+  chunk_size_vae: 1920       # ~40ms at 48k
+  chunk_size_prior: 14400    # ~300ms at 48k
+
   batch_size: 8
   lr: 1e-4
   kl_weight: 0.001
-  epochs: 100
+  epochs: 50
   ckpt_dir: "checkpoints/"
-  prior_lr: 1e-5
-  prior_epochs: 100
+  prior_lr: 1e-4
+  prior_epochs: 12
+
 inference:
   sample_rate: 48000
